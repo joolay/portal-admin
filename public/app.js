@@ -1,5 +1,5 @@
 'use strict';
-/* Portal Admin front-end. Talks to PocketBase through the /pb proxy using the signed-in superuser's token. */
+/* Joolzapp Portal front-end. Talks to PocketBase through the /pb proxy using the signed-in superuser's token. */
 const $ = (s, r = document) => r.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const store = {
@@ -137,9 +137,30 @@ async function boot() {
   if (state.token) { try { await api('GET', '/api/collections/portal_apps/records?perPage=1').catch((e) => { if (e.status !== 404) throw e; }); return showShell(); } catch {} }
   showLogin();
 }
-function showLogin() { $('#shell').classList.add('hidden'); $('#reset').classList.add('hidden'); $('#login').classList.remove('hidden'); }
+function showLogin() { $('#shell').classList.add('hidden'); $('#reset').classList.add('hidden'); $('#signup').classList.add('hidden'); $('#login').classList.remove('hidden'); }
 function resetToken() { const m = location.hash.match(/^#\/(?:reset|auth\/confirm-password-reset)\/([^/?]+)/); return m ? decodeURIComponent(m[1]) : ''; }
-function showReset() { $('#shell').classList.add('hidden'); $('#login').classList.add('hidden'); $('#reset').classList.remove('hidden'); $('#reset-pass').focus(); }
+$('#login-signup').onclick = (e) => { e.preventDefault(); $('#login').classList.add('hidden'); $('#signup').classList.remove('hidden'); $('#signup-err').textContent = ''; $('#signup-email').value = $('#login-email').value; $('#signup-email').focus(); };
+$('#signup-cancel').onclick = (e) => { e.preventDefault(); showLogin(); };
+$('#signup-form').onsubmit = async (e) => {
+  e.preventDefault(); $('#signup-err').textContent = '';
+  const email = $('#signup-email').value.trim(), password = $('#signup-pass').value;
+  if (password !== $('#signup-pass2').value) { $('#signup-err').textContent = 'Passwords do not match.'; return; }
+  try {
+    if (!$('#login-url').readOnly) {
+      const r = await fetch('/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pbUrl: $('#login-url').value.trim() }) });
+      if (!r.ok) throw new Error((await r.json()).message);
+    }
+    const body = { email, password, passwordConfirm: password, emailVisibility: true };
+    if ($('#signup-name').value.trim()) body.name = $('#signup-name').value.trim();
+    try { await api('POST', `/api/collections/${state.usersColl}/records`, body); }
+    catch (err) { throw new Error(err.status === 403 || err.status === 404 ? 'Sign-ups are currently closed. Ask the admin for an account.' : err.message); }
+    Object.assign(state, await signIn(email, password));
+    saveSession(false);
+    ['#signup-pass', '#signup-pass2'].forEach((id) => { $(id).value = ''; });
+    $('#signup').classList.add('hidden'); showShell();
+  } catch (err) { $('#signup-err').textContent = err.message; }
+};
+function showReset() { $('#shell').classList.add('hidden'); $('#login').classList.add('hidden'); $('#signup').classList.add('hidden'); $('#reset').classList.remove('hidden'); $('#reset-pass').focus(); }
 $('#reset-cancel').onclick = (e) => { e.preventDefault(); history.replaceState(null, '', location.pathname); showLogin(); };
 $('#reset-form').onsubmit = async (e) => {
   e.preventDefault(); $('#reset-err').textContent = '';
@@ -221,7 +242,7 @@ function route() {
 async function needSetup() {
   const st = await schemaStatus();
   if (st.every((s) => s.ok)) return false;
-  main().innerHTML = `<h1>First-time setup</h1><p class="sub">Portal Admin stores its data in PocketBase collections, and some are missing or need updated permissions.</p>
+  main().innerHTML = `<h1>First-time setup</h1><p class="sub">Joolzapp Portal stores its data in PocketBase collections, and some are missing or need updated permissions.</p>
     <div class="card"><ul>${st.map((s) => `<li><code>${s.name}</code> ${s.ok ? '<span class="chip ok">ready</span>' : '<span class="chip bad">missing</span>'}</li>`).join('')}</ul>
     <button id="mk" class="btn primary">Create collections</button></div>`;
   $('#mk').onclick = guard(async () => { await ensureSchema(); await audit('setup', 'schema'); toast('Collections created'); route(); });
@@ -466,17 +487,28 @@ async function userDetail(id) {
   }
   async function tabAccess() {
     const recs = (await listAll('portal_settings', { filter: `scope = "user" && user = ${fq(id)} && key = "portal.access"` }));
-    const blockedFor = (slug) => recs.find((r) => r.app === slug && r.value === false);
+    const ap = await approvalState();
+    const blockedFor = (slug) => {
+      const own = recs.find((r) => r.app === slug), uw = recs.find((r) => r.app === '');
+      if (own) return own.value === false ? own : undefined;
+      if (slug !== '' && uw) return uw.value === false ? uw : undefined;
+      return ap.required ? { inherited: true } : undefined;
+    };
     const all = blockedFor('');
     const targets = [{ slug: '', name: 'All apps' }, ...apps];
     $('#tab').innerHTML = `<div class="card"><p class="muted small">Untick to block this user. Apps check the <code>portal.access</code> setting (see Setup &amp; integration).</p>
       <table><tbody>${targets.map((t) => `<tr><td><b>${esc(t.name)}</b>${t.slug ? `<div class="muted small">${esc(t.slug)}</div>` : ''}</td>
-        <td>${t.slug && !t.enabled ? '<span class="chip bad">app disabled</span>' : ''}${t.slug && all ? ' <span class="chip">blocked by "All apps"</span>' : ''}</td>
+        <td>${t.slug && !t.enabled ? '<span class="chip bad">app disabled</span>' : ''}${t.slug && all && !all.inherited ? ' <span class="chip">blocked by "All apps"</span>' : ''}${ap.required && !recs.find((r) => r.app === t.slug) ? ' <span class="chip">approval required</span>' : ''}</td>
         <td style="width:90px"><label class="inline" style="margin:0"><input type="checkbox" data-slug="${esc(t.slug)}"${blockedFor(t.slug) ? '' : ' checked'}> allowed</label></td></tr>`).join('')}</tbody></table></div>`;
     $('#tab').onchange = guard(async (e) => {
       const slug = e.target.dataset.slug; if (slug === undefined) return;
       const ex = recs.find((r) => r.app === slug);
-      if (e.target.checked) { if (ex) await api('DELETE', `/api/collections/portal_settings/records/${ex.id}`); await audit('user.access.allow', id, { app: slug || '*' }); }
+      if (e.target.checked) {
+        const uw = recs.find((r) => r.app === '');
+        if (ap.required || (slug !== '' && uw && uw.value === false)) await setAccess(id, slug, true);
+        else if (ex) await api('DELETE', `/api/collections/portal_settings/records/${ex.id}`);
+        await audit('user.access.allow', id, { app: slug || '*' });
+      }
       else if (ex) await api('PATCH', `/api/collections/portal_settings/records/${ex.id}`, { value: false });
       else await api('POST', '/api/collections/portal_settings/records', { scope: 'user', user: id, app: slug, key: 'portal.access', value: false });
       if (!e.target.checked) await audit('user.access.block', id, { app: slug || '*' });
@@ -492,13 +524,30 @@ async function userDetail(id) {
   }
 }
 
+/* ---------- Account approval ---------- */
+// "Require approval" = a global portal.access=false row. Approved users get a user-wide portal.access=true row,
+// which outranks the global one, so apps need no extra logic beyond the portal.access check they already do.
+async function approvalState() {
+  const row = (await listAll('portal_settings', { filter: 'scope = "global" && key = "portal.access" && app = ""' }))[0];
+  return { required: !!row && row.value === false, row };
+}
+async function awaitingApproval() {
+  const [users, rows] = await Promise.all([listAll(state.usersColl, { sort: '-created', max: 5000 }), listAll('portal_settings', { filter: 'scope = "user" && app = "" && key = "portal.access"', max: 5000 })]);
+  const have = new Set(rows.map((r) => r.user)); return users.filter((u) => !have.has(u.id));
+}
+async function setAccess(user, app, value) {
+  const ex = (await listAll('portal_settings', { filter: `scope = "user" && user = ${fq(user)} && app = ${fq(app)} && key = "portal.access"` }))[0];
+  if (ex) await api('PATCH', `/api/collections/portal_settings/records/${ex.id}`, { value });
+  else await api('POST', '/api/collections/portal_settings/records', { scope: 'user', user, app, key: 'portal.access', value });
+}
+
 /* ---------- Access requests (admin) ---------- */
 async function viewRequests() {
   if (await needSetup()) return;
   const [reqs, apps] = await Promise.all([listAll('portal_requests', { sort: '-created', max: 500 }), listAll('portal_apps')]);
   const appName = (slug) => slug === DEL_REQ ? 'Account deletion' : (apps.find((a) => a.slug === slug) || {}).name || slug;
   const pending = reqs.filter((r) => r.status === 'pending'), done = reqs.filter((r) => r.status !== 'pending');
-  main().innerHTML = `<h1>Access requests</h1><p class="sub">Users asking for access to other Joolzapp services, or for their account to be deleted. Approving access sets <code>portal.access = true</code> for that user and app; confirming a deletion permanently removes the user and their settings.</p>
+  main().innerHTML = `<h1>Access requests</h1><p class="sub">Users asking for access to individual Joolzapp apps, and account deletion requests. Approving access sets <code>portal.access = true</code> for that user and app; confirming a deletion permanently removes the user and their settings.</p>
     <div class="card"><h2>Pending (${pending.length})</h2><table><tbody>${pending.map((r) => `<tr><td><b>${esc(r.email || r.user)}</b><div class="muted small">${esc(fmtDate(r.created))}</div></td>
       <td><b>${esc(appName(r.app))}</b>${r.message ? `<div class="small">${esc(r.message)}</div>` : ''}</td>
       <td style="white-space:nowrap">${r.app === DEL_REQ ? `<button class="btn danger small" data-act="approve" data-id="${esc(r.id)}">Confirm deletion</button>` : `<button class="btn primary small" data-act="approve" data-id="${esc(r.id)}">Approve</button>`} <button class="btn small" data-act="deny" data-id="${esc(r.id)}">Deny</button></td></tr>`).join('') || '<tr><td class="muted">No pending requests.</td></tr>'}</tbody></table></div>
@@ -557,7 +606,10 @@ async function viewMe() {
     const list = opts || zones.map((z) => [z, z]);
     return `<label>${esc(label)}<select name="${key}">${opt('', '— not set —', v === '')}${list.map(([val, l]) => opt(val, l, v === val)).join('')}</select></label>`;
   };
+  const userRow = acc.find((r) => r.scope === 'user' && r.app === ''), globalBlock = acc.find((r) => r.scope === 'global' && r.value === false);
+  const banner = userRow && userRow.value === false ? 'Your account access has been turned off. Contact the admin.' : (globalBlock && !userRow ? 'The admin approves access to each app separately. Request access to the apps you need below.' : '');
   main().innerHTML = `<h1>My settings</h1><p class="sub">Signed in as ${esc(state.actor)}. These preferences apply to every Joolzapp app you use.</p>
+    ${banner ? `<div class="card"><span class="chip warn">${esc(banner)}</span></div>` : ''}
     <form id="prefs" class="card"><h2>Preferences</h2><div class="kv">${PREFS.map(field).join('')}</div>
       ${detected ? `<p class="muted small">Your device time zone: ${esc(detected)}</p>` : ''}<button class="btn primary">Save preferences</button></form>
     <div class="card"><h2>Joolzapp services</h2>${reqs === null ? '<p class="muted">Access requests are not set up yet. Ask the admin.</p>' : `<table><tbody>${apps.map((a) => {
@@ -613,9 +665,14 @@ async function viewAudit() {
 
 async function viewSetup() {
   const st = await schemaStatus(); const cfg = await (await fetch('/config')).json();
+  const uColl = await api('GET', `/api/collections/${state.usersColl}`).catch(() => null);
   main().innerHTML = `<h1>Setup &amp; integration</h1><p class="sub">Connection details and how your apps consume these settings.</p>
     <div class="card"><h2>Connection</h2><p>PocketBase: <code>${esc(cfg.pbUrl)}</code> ${cfg.locked ? '<span class="chip">set by PB_URL</span>' : '<span class="muted small">(change it on the sign-in screen)</span>'}</p>
       <label>Users collection<input id="uc" value="${esc(state.usersColl)}" style="max-width:260px"></label><button id="su" class="btn">Save</button></div>
+    <div class="card"><h2>Sign-ups</h2><label class="inline"><input type="checkbox" id="su-open" disabled> Allow new users to create an account from the sign-in page</label>
+      <p class="muted small">Changes who can create records in the <code>${esc(state.usersColl)}</code> collection, so it applies to every Joolzapp app that uses these accounts.</p></div>
+    <div class="card"><h2>Account approval</h2><label class="inline"><input type="checkbox" id="ap-req" disabled> Require admin approval per app for new accounts</label>
+      <p class="muted small">Turning this on sets <code>portal.access = false</code> globally, so every app is closed by default. Existing users keep access to all apps. New sign-ups request each app separately and you approve them one app at a time under Access requests. Apps must honour <code>portal.access</code>.</p></div>
     <div class="card"><h2>Collections</h2><ul>${st.map((s) => `<li><code>${s.name}</code> ${s.ok ? '<span class="chip ok">ready</span>' : '<span class="chip bad">missing</span>'}</li>`).join('')}</ul>
       <button id="mk" class="btn primary">${st.every((s) => s.ok) ? 'Re-check' : 'Create missing collections'}</button></div>
     <div class="card"><h2>Using the settings from your apps</h2>
@@ -635,6 +692,31 @@ async function portalConfig(pb, slug) {
       <p class="muted small">The collection rules already restrict users to their own per-user rows, and hide settings flagged <i>secret</i>. Reserved keys: ${RESERVED.map((r) => `<code>${r[0]}</code> (${esc(r[2])})`).join('; ')}.</p></div>`;
   $('#su').onclick = () => { state.usersColl = $('#uc').value.trim() || 'users'; store.lset('pa.usersColl', state.usersColl); toast('Saved'); };
   $('#mk').onclick = guard(async () => { await ensureSchema(); toast('Collections ready'); viewSetup(); });
+  const apr = $('#ap-req');
+  approvalState().then((st) => {
+    apr.disabled = false; apr.checked = st.required;
+    apr.onchange = guard(async () => {
+      try {
+        if (apr.checked) {
+          if (!confirm('Require per-app approval for new accounts? Existing users keep access to all apps.')) { apr.checked = false; return; }
+          for (const u of await awaitingApproval()) await setAccess(u.id, '', true);
+          await api('POST', '/api/collections/portal_settings/records', { scope: 'global', app: '', user: '', key: 'portal.access', value: false, note: 'Require admin approval for new accounts' });
+        } else {
+          const cur = await approvalState(); if (cur.row) await api('DELETE', `/api/collections/portal_settings/records/${cur.row.id}`);
+        }
+      } catch (e) { apr.checked = !apr.checked; throw e; }
+      await audit(apr.checked ? 'approval.require' : 'approval.off', 'global'); toast(apr.checked ? 'New accounts need approval per app' : 'New accounts no longer need approval');
+    });
+  }).catch(() => {});
+  const so = $('#su-open');
+  if (uColl) {
+    so.disabled = false; so.checked = uColl.createRule !== null;
+    so.onchange = guard(async () => {
+      try { await api('PATCH', `/api/collections/${state.usersColl}`, { createRule: so.checked ? '' : null }); }
+      catch (e) { so.checked = !so.checked; throw e; }
+      await audit(so.checked ? 'signups.open' : 'signups.close', state.usersColl); toast(so.checked ? 'Sign-ups open' : 'Sign-ups closed');
+    });
+  }
 }
 
 boot();

@@ -1,4 +1,4 @@
-# Portal Admin
+# Joolzapp Portal
 
 Central admin panel for custom apps that share a PocketBase.
 
@@ -23,3 +23,6 @@ PB_URL=http://127.0.0.1:8090 DATA_DIR=./data PORT=3000 node server.js
 
 ## Umbrel
 Image is built by `.github/workflows/image.yml` to `ghcr.io/joolay/portal-admin:<version>` (make the package public). The Umbrel app manifest lives in [joolay/umbrel-apps](https://github.com/joolay/umbrel-apps) (`joolay-portal-admin/`). Bump `version` in `package.json` and the manifest + compose image tag there together.
+
+## Account approval
+Setup → *Require admin approval per app* sets a global `portal.access = false` (every app closed by default) and gives existing users a user-wide `portal.access = true` so they keep access. New sign-ups request each app and you approve them one by one under *Access requests*, which sets `portal.access = true` for that user × app. Apps only need the `portal.access` check they already do.
