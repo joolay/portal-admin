@@ -11,18 +11,39 @@
 <div id="login" class="login hidden">
   <form id="login-form" class="card login-card" autocomplete="on">
     <div class="brand big"><img src="icon.svg" alt="" width="40" height="40"><span>Portal Admin</span></div>
-    <p class="muted">Sign in with your PocketBase <strong>superuser</strong> account.</p>
+    <p class="muted">Sign in with your <strong>JoolzApp</strong> account (or PocketBase superuser).</p>
     <label>PocketBase URL
       <input id="login-url" type="url" placeholder="http://umbrel.local:8090" required>
     </label>
-    <label>Superuser email
+    <label>Email
       <input id="login-email" type="email" autocomplete="username" required>
     </label>
     <label>Password
       <input id="login-pass" type="password" autocomplete="current-password" required>
     </label>
+    <div class="login-opts">
+      <label class="inline"><input id="login-remember" type="checkbox"> Remember me</label>
+      <a href="#" id="login-forgot" class="small">Forgot password?</a>
+    </div>
     <div id="login-err" class="error"></div>
+    <div id="login-ok" class="ok-msg"></div>
     <button class="btn primary" type="submit">Sign in</button>
+  </form>
+</div>
+
+<div id="reset" class="login hidden">
+  <form id="reset-form" class="card login-card" autocomplete="on">
+    <div class="brand big"><img src="icon.svg" alt="" width="40" height="40"><span>Portal Admin</span></div>
+    <p class="muted">Choose a new password.</p>
+    <label>New password
+      <input id="reset-pass" type="password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <label>Confirm new password
+      <input id="reset-pass2" type="password" autocomplete="new-password" minlength="8" required>
+    </label>
+    <div id="reset-err" class="error"></div>
+    <button class="btn primary" type="submit">Set new password</button>
+    <p class="small"><a href="#" id="reset-cancel">Back to sign in</a></p>
   </form>
 </div>
 
@@ -34,6 +55,7 @@
       <a href="#/global" data-route="global">Global settings</a>
       <a href="#/apps" data-route="apps">Apps</a>
       <a href="#/users" data-route="users">Users</a>
+      <a href="#/requests" data-route="requests">Access requests</a>
       <a href="#/audit" data-route="audit">Audit log</a>
       <a href="#/setup" data-route="setup">Setup &amp; integration</a>
     </nav>

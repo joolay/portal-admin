@@ -5,12 +5,14 @@ Central admin panel for custom apps that share a PocketBase.
 - **Global settings**: defaults for every app and user.
 - **Apps**: register apps; enable/disable, maintenance mode + message, per-app settings.
 - **Users**: browse/create/edit/delete PocketBase users, block a user (everywhere or per app), per-user setting overrides, effective-settings preview.
+- **Access requests**: users ask for access to other apps; approving sets `portal.access = true` for that user and app.
 - **Audit log**: every change made here.
+- **My settings** (regular JoolzApp users sign in on the same form): language, currency, time zone, date/time format, units, theme (stored as all-apps user settings `pref.*`, so every app gets them via the normal precedence), service access requests, and a request to delete their account (nothing is deleted until you confirm it under Access requests).
 
 Precedence: `global < app < user (all apps) < user × app`.
 
 ## How it works
-Zero-dependency Node server serving a static UI and proxying `/pb/*` to your PocketBase. No credentials are stored: you sign in as a PocketBase **superuser** and the browser keeps the token in `sessionStorage`. On first sign-in it offers to create three collections: `portal_apps`, `portal_settings`, `portal_audit`. `portal_settings` is readable by signed-in app users only for non-secret global/app rows and their own user rows; writes are superuser-only.
+Zero-dependency Node server serving a static UI and proxying `/pb/*` to your PocketBase. No credentials are stored: you sign in as a PocketBase **superuser** and the browser keeps the token in `sessionStorage`. On first sign-in it offers to create the collections: `portal_apps`, `portal_settings`, `portal_requests`, `portal_audit`. `portal_settings` is readable by signed-in app users only for non-secret global/app rows and their own user rows; writes are superuser-only.
 
 Reserved key: `portal.access` = `false` blocks a user (app = blank → all apps). Apps must check it (see snippet on the Setup page).
 
